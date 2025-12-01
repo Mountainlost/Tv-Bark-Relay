@@ -10,14 +10,14 @@ app = Flask(__name__)
 BARK_KEY = os.environ.get("BARK_KEY", "")
 BARK_SERVER = os.environ.get("BARK_SERVER", "https://api.day.app")
 
-# ====== A 股代码 -> 中文名称 映射表（示例，按需继续补充）======
+# ====== A 股代码 -> 中文名称 映射表 ======
 STOCK_NAMES = {
     "000559": "万向钱潮",
     "600519": "贵州茅台",
     "000858": "五粮液",
     "601318": "中国平安",
     "300750": "宁德时代",
-    # ... 想交易什么就往这里加
+    # 继续追加你需要的股票
 }
 
 
@@ -27,58 +27,34 @@ def build_bark_message(data: dict):
     ticker = str(data.get("ticker", "") or "")
     price = data.get("price", None)
     side = str(data.get("side", "") or "").upper()
-    strategy = data.get("strategy", "多空终极策略")
-    timeframe = data.get("timeframe", "")
-    time_str = data.get("time", "")
 
-    # 价格格式化
-    try:
-        price_val = float(price)
-        price_text = f"{price_val:.2f}"
-    except (TypeError, ValueError):
-        price_text = str(price) if price is not None else ""
-
-    # ===== 这里是代码 -> 中文名 的映射 =====
-    STOCK_NAMES = {
-        "000559": "万向钱潮",
-        "600519": "贵州茅台",
-        "000858": "五粮液",
-        "601318": "中国平安",
-        "300750": "宁德时代",
-        # …需要的股票继续往下加
-    }
-
+    # 名称映射
     name = STOCK_NAMES.get(ticker, "")
     if name:
         name_code = f"{name} {ticker}"
     else:
         name_code = ticker or "未知标的"
 
+    # 价格格式化
+    try:
+        price_val = float(price)
+        price_text = f"{price_val:.2f}"
+    except Exception:
+        price_text = str(price) if price else ""
+
+    # ===== 方案 A —— 标题紧凑格式 =====
+    # 🟢 𝐁【万向钱潮 000559】11.82
     if side == "BUY":
-        title = f"🟢 𝐁【{name_code}】买入"
+        title = f"🟢 𝐁【{name_code}】{price_text}"
     elif side == "SELL":
-        title = f"🔴 𝐒【{name_code}】卖出"
+        title = f"🔴 𝐒【{name_code}】{price_text}"
     else:
-        title = f"{name_code} 信号"
+        title = f"{name_code} {price_text}"
 
-
-    # ===== 正文保持不变 =====
-    lines = []
-    if strategy:
-        lines.append(f"策略：{strategy}")
-    if timeframe:
-        lines.append(f"周期：{timeframe}")
-    if time_str:
-        lines.append(f"时间：{time_str}")
-    if price_text:
-        lines.append(f"价格：{price_text}")
-    if side:
-        lines.append(f"方向：{side}")
-
-    body = "\n".join(lines) if lines else "TradingView 信号"
+    # ===== 正文不显示 =====
+    body = ""
 
     return title, body
-
 
 
 @app.route("/", methods=["GET"])
@@ -99,6 +75,7 @@ def tv_webhook():
 
     title, body = build_bark_message(data)
 
+    # URL 编码
     title_enc = urllib.parse.quote(title)
     body_enc = urllib.parse.quote(body)
 
@@ -106,22 +83,20 @@ def tv_webhook():
 
     try:
         resp = requests.get(bark_url, timeout=5)
-        return jsonify(
-            {
-                "ok": True,
-                "bark_status_code": resp.status_code,
-                "bark_response": resp.text,
-                "title": title,
-                "body": body,
-            }
-        )
+        return jsonify({
+            "ok": True,
+            "bark_status_code": resp.status_code,
+            "bark_response": resp.text,
+            "title": title,
+            "body": body,
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": "bark request failed", "detail": str(e)}), 500
 
 
 @app.route("/test", methods=["GET"])
 def test():
-    """发送一条示例 BUY 通知到 Bark，方便你测试"""
+    """发送示例通知，方便自测"""
     if not BARK_KEY:
         return "BARK_KEY not set", 500
 
@@ -129,14 +104,13 @@ def test():
         "ticker": "000559",
         "price": 11.82,
         "side": "BUY",
-        "strategy": "多空终极策略",
-        "timeframe": "1D",
-        "time": "2025-11-06 14:50",
     }
+
     title, body = build_bark_message(sample)
 
     title_enc = urllib.parse.quote(title)
     body_enc = urllib.parse.quote(body)
+
     bark_url = f"{BARK_SERVER}/{BARK_KEY}/{title_enc}/{body_enc}"
 
     try:
