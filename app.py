@@ -6,10 +6,6 @@ from urllib.parse import quote
 import requests
 from flask import Flask, request, jsonify
 
-@app.route("/version")
-def version():
-    return "build-20251201-eastmoney-v1"
-
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
