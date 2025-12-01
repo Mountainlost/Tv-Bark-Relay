@@ -9,13 +9,14 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
+# 环境变量：Bark 配置
 BARK_KEY = os.environ.get("BARK_KEY")
 BARK_SERVER = os.environ.get("BARK_SERVER", "https://api.day.app").rstrip("/")
 
 
-# ---------------------------
-# 工具函数：标准化 ticker
-# ---------------------------
+# =====================
+# 工具函数：代码标准化
+# =====================
 
 def normalize_ticker(raw_ticker: str) -> str:
     """
@@ -46,21 +47,20 @@ def normalize_ticker(raw_ticker: str) -> str:
     return s
 
 
-# ---------------------------
-# 工具函数：东方财富查股票中文名
-# ---------------------------
+# ============================
+# 工具函数：东方财富查中文名
+# ============================
 
 def fetch_stock_name_from_eastmoney(code: str) -> str:
     """
     使用东方财富 push2 接口，根据 6 位代码获取中文名。
-    例：
-      000001 -> secid=0.000001  （深市）
-      600000 -> secid=1.600000  （沪市）
+      000001 -> 深市，secid=0.000001
+      600000 -> 沪市，secid=1.600000
     """
     if not code or len(code) != 6 or not code.isdigit():
         return ""
 
-    # 约定：6 打头为沪市，0/3 打头为深市
+    # 约定：6 打头为沪市，其余默认深市
     if code.startswith("6"):
         market = "1"  # 沪
     else:
@@ -71,9 +71,7 @@ def fetch_stock_name_from_eastmoney(code: str) -> str:
     url = "https://push2.eastmoney.com/api/qt/stock/get"
     params = {
         "secid": secid,
-        # 只要名称字段 f58，其他字段省略
-        "fields": "f58",
-        # 按常见调用习惯带上这几个参数，减少被风控概率
+        "fields": "f58",  # f58 = 股票名称
         "ut": "fa5fd1943c7b386f172d6893dbfba10b",
         "fltt": "2",
         "invt": "2",
@@ -82,21 +80,21 @@ def fetch_stock_name_from_eastmoney(code: str) -> str:
     try:
         resp = requests.get(url, params=params, timeout=2)
         if resp.status_code != 200:
-            app.logger.warning(f"Eastmoney name query failed, code={code}, status={resp.status_code}")
+            app.logger.warning(f"[EastMoney] HTTP {resp.status_code} for code={code}")
             return ""
 
         j = resp.json()
         data = j.get("data") or {}
         name = data.get("f58") or ""
         if not name:
-            app.logger.warning(f"Eastmoney no name for code={code}, resp={j}")
+            app.logger.warning(f"[EastMoney] No f58 for code={code}, resp={j}")
         return name
     except Exception as e:
-        app.logger.exception(f"Eastmoney request error for code={code}: {e}")
+        app.logger.exception(f"[EastMoney] request error for code={code}: {e}")
         return ""
 
 
-def build_name_code(raw_ticker: str) -> (str, str):
+def build_name_code(raw_ticker: str):
     """
     综合处理：输入 TradingView 的 ticker，
     返回：
@@ -130,9 +128,9 @@ def format_price(price_raw):
         return str(price_raw)
 
 
-# ---------------------------
+# ======================
 # Bark 发送函数
-# ---------------------------
+# ======================
 
 def send_bark(title: str, body: str = "", group: str = "TV") -> dict:
     if not BARK_KEY:
@@ -157,9 +155,9 @@ def send_bark(title: str, body: str = "", group: str = "TV") -> dict:
         return {"ok": False, "error": str(e)}
 
 
-# ---------------------------
+# ======================
 # 基本路由
-# ---------------------------
+# ======================
 
 @app.route("/")
 def index():
@@ -171,13 +169,20 @@ def health():
     return "ok"
 
 
-# ---------------------------
-# /test：支持 code / price / side
-# ---------------------------
+@app.route("/version")
+def version():
+    # 方便你确认 Railway 真的在跑这一版
+    return "tv-bark-relay-eastmoney-v1"
+
+
+# ======================
+# /test 路由
+# ======================
 
 @app.route("/test")
 def test():
-    raw_ticker = request.args.get("code", "000559")
+    # 示例：/test?code=301021&side=BUY&price=12.34
+    raw_ticker = request.args.get("code", "000001")
     side = request.args.get("side", "BUY").upper()
     price_raw = request.args.get("price", "")
 
@@ -191,12 +196,13 @@ def test():
         title = f"🔴 𝐒{price_text}" if price_text else f"🔴 𝐒"
     else:
         title = f"{name_code} {price_text}"
-    # ----- 上面这段逻辑保持不变 -----
+    # ----- 标题格式到此结束（保持不变）-----
 
     body = "TV→Bark 测试推送"
     result = send_bark(title, body, group="TV-TEST")
 
     return jsonify({
+        "ok": True,
         "ticker": raw_ticker,
         "code": code,
         "name_code": name_code,
@@ -207,9 +213,9 @@ def test():
     })
 
 
-# ---------------------------
-# TradingView Webhook 路由
-# ---------------------------
+# ======================
+# TradingView Webhook
+# ======================
 
 @app.route("/tv-webhook", methods=["POST"])
 def tv_webhook():
@@ -230,7 +236,7 @@ def tv_webhook():
     except Exception:
         return jsonify({"ok": False, "error": "Invalid JSON"}), 400
 
-    app.logger.info(f"Received webhook: {data}")
+    app.logger.info(f"[Webhook] Received: {data}")
 
     raw_ticker = data.get("ticker", "")
     side = str(data.get("side", "")).upper()
@@ -249,7 +255,7 @@ def tv_webhook():
         title = f"🔴 𝐒{price_text}" if price_text else f"🔴 𝐒"
     else:
         title = f"{name_code} {price_text}"
-    # ----- 上面这段逻辑保持不变 -----
+    # ----- 标题格式到此结束（保持不变）-----
 
     # 副标题 / 内容
     body_parts = []
@@ -276,6 +282,10 @@ def tv_webhook():
         "bark_result": result,
     })
 
+
+# ======================
+# 本地调试入口
+# ======================
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
