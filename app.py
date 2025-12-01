@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 from urllib.parse import quote
 
@@ -9,7 +8,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# 环境变量：Bark 配置
+# Bark 配置
 BARK_KEY = os.environ.get("BARK_KEY")
 BARK_SERVER = os.environ.get("BARK_SERVER", "https://api.day.app").rstrip("/")
 
@@ -96,7 +95,7 @@ def fetch_stock_name_from_eastmoney(code: str) -> str:
 
 def build_name_code(raw_ticker: str):
     """
-    综合处理：输入 TradingView 的 ticker，
+    输入 TradingView 的 ticker，
     返回：
       name_code: "股票名 代码" 或 "代码" 或原始 ticker
       code:      标准 6 位代码（可能为空）
@@ -171,8 +170,8 @@ def health():
 
 @app.route("/version")
 def version():
-    # 方便你确认 Railway 真的在跑这一版
-    return "tv-bark-relay-eastmoney-v1"
+    # 方便确认 Railway 跑的是这一版
+    return "tv-bark-relay-eastmoney-final"
 
 
 # ======================
@@ -196,7 +195,7 @@ def test():
         title = f"🔴 𝐒{price_text}" if price_text else f"🔴 𝐒"
     else:
         title = f"{name_code} {price_text}"
-    # ----- 标题格式到此结束（保持不变）-----
+    # ----- 标题格式到此结束，不改动 -----
 
     body = "TV→Bark 测试推送"
     result = send_bark(title, body, group="TV-TEST")
@@ -255,7 +254,7 @@ def tv_webhook():
         title = f"🔴 𝐒{price_text}" if price_text else f"🔴 𝐒"
     else:
         title = f"{name_code} {price_text}"
-    # ----- 标题格式到此结束（保持不变）-----
+    # ----- 标题格式到此结束，不改动 -----
 
     # 副标题 / 内容
     body_parts = []
