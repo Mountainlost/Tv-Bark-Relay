@@ -38,14 +38,23 @@ def build_bark_message(data: dict):
     except (TypeError, ValueError):
         price_text = str(price) if price is not None else ""
 
-    # 中文名称
+    # ===== 这里是代码 -> 中文名 的映射 =====
+    STOCK_NAMES = {
+        "000559": "万向钱潮",
+        "600519": "贵州茅台",
+        "000858": "五粮液",
+        "601318": "中国平安",
+        "300750": "宁德时代",
+        # …需要的股票继续往下加
+    }
+
     name = STOCK_NAMES.get(ticker, "")
     if name:
         name_code = f"{name} {ticker}"
     else:
         name_code = ticker or "未知标的"
 
-    # 标题格式：买=绿B，卖=红S
+    # ===== 标题，带【股票 中文名+代码】 =====
     if side == "BUY":
         title = f"🟢 𝐁买入"
     elif side == "SELL":
@@ -53,7 +62,7 @@ def build_bark_message(data: dict):
     else:
         title = f"{name_code} 信号"
 
-    # 正文：放一些细节
+    # ===== 正文保持不变 =====
     lines = []
     if strategy:
         lines.append(f"策略：{strategy}")
@@ -69,6 +78,7 @@ def build_bark_message(data: dict):
     body = "\n".join(lines) if lines else "TradingView 信号"
 
     return title, body
+
 
 
 @app.route("/", methods=["GET"])
