@@ -54,13 +54,13 @@ def build_bark_message(data: dict):
     else:
         name_code = ticker or "未知标的"
 
-    # ===== 标题，带【股票 中文名+代码】 =====
     if side == "BUY":
-        title = f"🟢 𝐁买入"
+        title = f"🟢 𝐁【{name_code}】买入"
     elif side == "SELL":
-        title = f"🔴 𝐒卖出"
+        title = f"🔴 𝐒【{name_code}】卖出"
     else:
         title = f"{name_code} 信号"
+
 
     # ===== 正文保持不变 =====
     lines = []
