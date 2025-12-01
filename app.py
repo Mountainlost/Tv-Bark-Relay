@@ -131,13 +131,13 @@ def build_bark_message(data: dict):
     else:
         name_code = ticker_raw or "未知标的"
 
-    # 标题格式：🟢/🔴 + B/S + 【中文名 代码】+ 价格
+   # ----- 标题格式（你要求的格式）-----
     if side == "BUY":
-        title = f"🟢 𝐁{price_text}" if price_text else f"🟢 𝐁"
+        title = f"🟢 𝐁【{name_code}】{price_text}" if price_text else f"🟢 𝐁【{name_code}】"
     elif side == "SELL":
-        title = f"🔴 𝐒{price_text}" if price_text else f"🔴 𝐒"
+        title = f"🔴 𝐒【{name_code}】{price_text}" if price_text else f"🔴 𝐒【{name_code}】"
     else:
-        title = f"{name_code} {price_text}".strip()
+        title = f"{name_code} {price_text}"
 
     # 你要求正文不显示内容
     body = ""
