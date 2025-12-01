@@ -10,39 +10,37 @@ app = Flask(__name__)
 BARK_KEY = os.environ.get("BARK_KEY", "")
 BARK_SERVER = os.environ.get("BARK_SERVER", "https://api.day.app")
 
-# ===== A 股代码 -> 中文名本地缓存（常用的可以先写这里）=====
+# ===== A 股代码 -> 中文名本地缓存（常用可以先写几只）=====
 STOCK_NAMES: dict[str, str] = {
     "000559": "万向钱潮",
     "600519": "贵州茅台",
     "000858": "五粮液",
     "601318": "中国平安",
     "300750": "宁德时代",
-    # 以后你常用的票可以往这里追加几只
 }
 
 A_SHARE_CODE_RE = re.compile(r"^\d{6}$")
 
-# 为了减少 Bark 请求延迟，用一个全局 Session 复用连接
+# 尽量减少延迟，复用 TCP 连接
 session = requests.Session()
 
 
+# ===== 判断股票交易所（主板/创业板/科创板）=====
 def guess_market_prefix(ticker: str) -> str:
-    """根据 6 位代码猜测交易所前缀（主板 + 创业板 + 科创板）"""
+    """推断股票属于 sh 或 sz（支持主板 + 创业板 + 科创）"""
     if not A_SHARE_CODE_RE.match(ticker):
         return ""
-    if ticker.startswith("6"):      # 沪市（主板 + 科创）
-        return "sh"
-    if ticker.startswith("0") or ticker.startswith("3"):  # 深市（主板 + 创业板）
-        return "sz"
+
+    if ticker.startswith("6"):
+        return "sh"  # 上海（含科创板）
+    if ticker.startswith("0") or ticker.startswith("3"):
+        return "sz"  # 深圳（主板 + 创业板）
     return ""
 
 
+# ===== 从腾讯接口获取中文名称 =====
 def fetch_name_from_tencent(ticker: str) -> str:
-    """
-    从腾讯行情接口获取中文名：
-    例：https://qt.gtimg.cn/q=sh600519
-    返回格式：v_sh600519="1~贵州茅台~600519~..."
-    """
+    """调用腾讯行情接口获取股票中文名"""
     prefix = guess_market_prefix(ticker)
     if not prefix:
         return ""
@@ -62,75 +60,77 @@ def fetch_name_from_tencent(ticker: str) -> str:
         return ""
 
 
+# ===== 获取中文名（缓存 + 自动查询）=====
 def get_stock_name(ticker: str) -> str:
-    """优先用缓存，没有就调用腾讯接口获取中文名并写入缓存。"""
     if not ticker:
         return ""
     if ticker in STOCK_NAMES:
         return STOCK_NAMES[ticker]
+
     if not A_SHARE_CODE_RE.match(ticker):
         return ""
 
+    # 腾讯接口查询
     name = fetch_name_from_tencent(ticker)
     if name:
-        STOCK_NAMES[ticker] = name
+        STOCK_NAMES[ticker] = name  # 写入缓存
         return name
+
     return ""
 
 
+# ===== 构建 Bark 推送 =====
 def build_bark_message(data: dict):
     """
-    根据 TradingView 传来的 JSON，构造 Bark 标题和正文。
-
-    预期 TV 传入字段示例：
+    预期 TradingView JSON 示例：
     {
       "ticker": "000559",
       "price": 11.82,
       "side": "BUY"
     }
-    其他字段（strategy / timeframe / time）你可以随意加，这里不强依赖。
     """
 
     ticker = str(data.get("ticker", "") or "")
-    price = data.get("price", None)
+    price = data.get("price")
     side = str(data.get("side", "") or "").upper()
 
-    # 价格格式化
+    # ----- 格式化价格 -----
     try:
         price_val = float(price)
         price_text = f"{price_val:.2f}"
-    except (TypeError, ValueError):
+    except:
         price_text = str(price) if price is not None else ""
 
-    # 自动获取中文名
+    # ----- 自动中文名 -----
     name = get_stock_name(ticker)
     if name:
         name_code = f"{name} {ticker}"
     else:
         name_code = ticker or "未知标的"
 
-    # ===== 标题（方案 A）：🟢 𝐁【万向钱潮 000559】11.82 / 🔴 𝐒【万向钱潮 000559】11.82 =====
+    # ----- 标题格式（你要求的格式）-----
     if side == "BUY":
-        title = f"🟢 𝐁{price_text}" if price_text else f"🟢 𝐁"
+        title = f"🟢 𝐁【{name_code}】{price_text}" if price_text else f"🟢 𝐁【{name_code}】"
     elif side == "SELL":
-        title = f"🔴 𝐒{price_text}" if price_text else f"🔴 𝐒"
+        title = f"🔴 𝐒【{name_code}】{price_text}" if price_text else f"🔴 𝐒【{name_code}】"
     else:
-        title = f"{name_code} {price_text}" if price_text else name_code
+        title = f"{name_code} {price_text}"
 
-    # 正文你说可以不显示，这里给一个很短的占位
+    # 正文不显示（你要求）
     body = ""
 
     return title, body
 
 
+# ===== 健康检查 =====
 @app.route("/", methods=["GET"])
 def health():
     return "TV -> Bark relay is running."
 
 
+# ===== TradingView Webhook 接口 =====
 @app.route("/tv-webhook", methods=["POST"])
 def tv_webhook():
-    """TradingView Webhook 入口"""
     try:
         data = request.get_json(force=True)
     except Exception as e:
@@ -147,44 +147,35 @@ def tv_webhook():
 
     try:
         resp = session.get(bark_url, timeout=3)
-        return jsonify(
-            {
-                "ok": True,
-                "bark_status_code": resp.status_code,
-                "bark_response": resp.text,
-                "title": title,
-                "body": body,
-            }
-        )
+        return jsonify({
+            "ok": True,
+            "bark_status_code": resp.status_code,
+            "bark_response": resp.text,
+            "title": title
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": "bark request failed", "detail": str(e)}), 500
 
 
+# ===== 测试接口 =====
 @app.route("/test", methods=["GET"])
 def test():
-    """测试接口，浏览器打开就会给自己发一条测试通知。"""
     if not BARK_KEY:
         return "BARK_KEY not set", 500
 
-    sample = {
-        "ticker": "000559",
-        "price": 11.82,
-        "side": "BUY",
-    }
+    sample = {"ticker": "000559", "price": 11.82, "side": "BUY"}
+
     title, body = build_bark_message(sample)
 
-    title_enc = urllib.parse.quote(title)
-    body_enc = urllib.parse.quote(body)
-    bark_url = f"{BARK_SERVER}/{BARK_KEY}/{title_enc}/{body_enc}"
+    url = f"{BARK_SERVER}/{BARK_KEY}/{urllib.parse.quote(title)}/{urllib.parse.quote(body)}"
 
     try:
-        session.get(bark_url, timeout=3)
-    except Exception:
+        session.get(url, timeout=3)
+    except:
         pass
 
     return f"Test notification sent: {title}"
 
 
 if __name__ == "__main__":
-    # 本地调试用；Railway 上不会执行这一段
     app.run(host="0.0.0.0", port=8000, debug=True)
